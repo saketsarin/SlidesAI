@@ -76,22 +76,35 @@ class PresentationApp:
                 'description': description
             }
             
-            # Show progress while making request
+            # Use a separate thread for the request to allow progress updates
+            import threading
+
+            def make_request():
+                nonlocal response
+                response = requests.post(
+                    f'{self.api_url}/create_presentation',
+                    headers=headers,
+                    data=json.dumps(payload),
+                    timeout=1000  # Increased timeout for diagram generation
+                )
+
+            response = None
+            request_thread = threading.Thread(target=make_request)
+            request_thread.start()
+
+            # Update progress bar while the request is being made
             for message, progress in steps:
-                status_text.write(message)
-                progress_bar.progress(progress)
-                time.sleep(10)
-            
-            response = requests.post(
-                f'{self.api_url}/create_presentation',
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=1000  # Increased timeout for diagram generation
-            )
-            
-            if response.status_code != 200:
-                error_data = response.json()
-                error_message = error_data.get('error', 'Unknown error occurred')
+                if request_thread.is_alive():
+                    status_text.write(message)
+                    progress_bar.progress(progress)
+                    time.sleep(10)  # Simulate progress update timing
+                else:
+                    break
+
+            request_thread.join()
+
+            if response is None or response.status_code != 200:
+                error_message = response.json().get('error', 'Unknown error occurred') if response else 'No response from server'
                 st.error(f"Server Error: {error_message}")
                 return None
             
