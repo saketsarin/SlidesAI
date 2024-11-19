@@ -10,24 +10,31 @@ class OpenAIService:
         self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
     
     def create_presentation_content(self, topic, description=""):
-        """Generate presentation content using GPT-4"""
+        """Generate presentation content with diagram suggestions"""
         try:
             logger.info(f"Generating content for topic: {topic}")
             
             prompt = f"""Create a detailed presentation outline for the topic: {topic}
             Additional context: {description}
             
+            For each section, also suggest if it would benefit from a diagram and what type of diagram.
+            
             Please provide:
             1. A compelling title
-            2. 10 main sections
+            2. 3 main sections
             3. 3-4 key points for each section
-            4. Relevant examples or data points where applicable
+            4. For sections that need visualization, include a "diagram_prompt" with specific instructions
+            5. Out of all the sections, maximum half of them should have diagrams
             
             Format as JSON with the following structure:
             {{
                 "title": "Main title",
                 "slides": [
-                    {{"title": "Slide title", "content": ["point 1", "point 2", "point 3"]}},
+                    {{
+                        "title": "Slide title",
+                        "content": ["point 1", "point 2", "point 3"],
+                        "diagram_prompt": "Optional. Detailed instructions for diagram generation"
+                    }}
                 ]
             }}
             """

@@ -61,8 +61,8 @@ class PresentationApp:
             ("🔄 Initializing...", 10),
             ("🤖 Connecting to AI service...", 20),
             ("📝 Generating content...", 40),
-            ("🎨 Creating slides...", 60),
-            ("📊 Formatting presentation...", 80),
+            ("🎨 Creating diagrams...", 60),
+            ("📊 Building presentation...", 80),
             ("✅ Finalizing...", 90),
         ]
         
@@ -76,17 +76,17 @@ class PresentationApp:
                 'description': description
             }
             
-            # Show initial progress
-            for message, progress in steps[:2]:
+            # Show progress while making request
+            for message, progress in steps:
                 status_text.write(message)
                 progress_bar.progress(progress)
-                time.sleep(0.3)
+                time.sleep(10)
             
             response = requests.post(
                 f'{self.api_url}/create_presentation',
                 headers=headers,
                 data=json.dumps(payload),
-                timeout=180
+                timeout=1000  # Increased timeout for diagram generation
             )
             
             if response.status_code != 200:
@@ -96,7 +96,12 @@ class PresentationApp:
                 return None
             
             result = response.json()
-            
+
+            # Show completion
+            status_text.write("✨ Presentation ready!")
+            progress_bar.progress(100)
+            time.sleep(0.5)
+
             # Update session state and trigger rerun
             st.session_state.presentation_ready = True
             st.session_state.presentation_id = result['presentation_id']

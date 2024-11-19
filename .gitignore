@@ -3,3 +3,4 @@ venv
 client_secrets.json
 token.json
 __pycache__
+backend/models/sd-ai2d-model

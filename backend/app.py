@@ -6,6 +6,7 @@ from config import Config
 from services.openai_service import OpenAIService
 from services.google_service import GoogleService
 from services.presentation_service import PresentationService
+from services.diagram_service import DiagramService
 from utils.text_processor import TextProcessor
 
 # Configure logging
@@ -77,6 +78,39 @@ def verify_environment():
             return False
     
     return True
+
+@app.route('/generate_diagram', methods=['POST'])
+def generate_diagram():
+    """API endpoint to generate a diagram"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        prompt = data.get('prompt')
+        presentation_id = data.get('presentationId')
+        slide_id = data.get('slideId')
+        
+        if not all([prompt, presentation_id, slide_id]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+        
+        # Generate diagram
+        diagram_service = DiagramService()
+        image_path = diagram_service.generate_diagram(prompt)
+        
+        # Insert into presentation
+        credentials = GoogleService.get_credentials()
+        presentation_service = PresentationService(credentials)
+        presentation_service.insert_diagram(presentation_id, slide_id, image_path)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Diagram generated and inserted successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Diagram generation error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     if not verify_environment():
