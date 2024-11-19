@@ -3,7 +3,9 @@ import streamlit.components.v1 as components
 import requests
 import json
 import time
+from config import Config
 from utils.ui_helpers import UIHelper
+from utils.theme_previews import ThemePreviewer
 
 class PresentationApp:
     def __init__(self):
@@ -15,6 +17,7 @@ class PresentationApp:
         # Initialize session state
         if 'presentation_ready' not in st.session_state:
             st.session_state.presentation_ready = False
+            st.session_state.selected_theme = None
             st.set_page_config(
                 page_title="Slides AI",
                 page_icon="../Logo_small.png",
@@ -55,8 +58,46 @@ class PresentationApp:
         """
         components.html(embed_html, height=370)
     
+    def display_theme_previews(self):
+        """Display clickable theme previews"""
+        st.subheader("Select a Theme")
+        
+        # Create columns for theme previews
+        cols = st.columns(3)
+        
+        for idx, (theme_id, theme) in enumerate(Config.PRESENTATION_THEMES.items()):
+            with cols[idx % 3]:
+                # Create container for preview and selection indicator
+                preview_container = st.container()
+                
+                # Generate theme preview
+                preview_html = ThemePreviewer.generate_theme_preview(theme)
+                
+                # Add click handler using HTML
+                clickable_preview = f"""
+                <div onclick="parent.postMessage({{theme: '{theme_id}'}}, '*')" style="cursor: pointer; position: relative;">
+                    {preview_html}
+                    <div style="position: absolute; top: 5px; right: 5px; padding: 5px; background: {'#4CAF50' if st.session_state.selected_theme == theme_id else 'transparent'}; border-radius: 50%;">
+                        {'✓' if st.session_state.selected_theme == theme_id else ''}
+                    </div>
+                </div>
+                """
+                
+                # Display clickable preview
+                components.html(clickable_preview, height=150)
+                st.caption(theme['name'])
+                
+                # Handle click events
+                if preview_container.button("Select", key=f"theme_{theme_id}", use_container_width=True):
+                    st.session_state.selected_theme = theme_id
+                    st.rerun()
+    
     def generate_presentation(self, topic, description=""):
         """Generate presentation with dynamic layout"""
+        if not st.session_state.selected_theme:
+            st.error("⚠️ Please select a theme first")
+            return None
+            
         steps = [
             ("🔄 Initializing...", 10),
             ("🤖 Connecting to AI service...", 20),
@@ -73,7 +114,8 @@ class PresentationApp:
             headers = {'Content-Type': 'application/json'}
             payload = {
                 'topic': topic,
-                'description': description
+                'description': description,
+                'theme': st.session_state.selected_theme
             }
             
             # Use a separate thread for the request to allow progress updates
@@ -85,7 +127,7 @@ class PresentationApp:
                     f'{self.api_url}/create_presentation',
                     headers=headers,
                     data=json.dumps(payload),
-                    timeout=1000  # Increased timeout for diagram generation
+                    timeout=10000
                 )
 
             response = None
@@ -97,7 +139,7 @@ class PresentationApp:
                 if request_thread.is_alive():
                     status_text.write(message)
                     progress_bar.progress(progress)
-                    time.sleep(10)  # Simulate progress update timing
+                    time.sleep(10)
                 else:
                     break
 
@@ -137,6 +179,9 @@ class PresentationApp:
         
         st.title("🎯 Slides AI")
         st.write("Generate professional presentations in under a minute!")
+
+        # Display theme previews with selection functionality
+        self.display_theme_previews()
         
         # If presentation is ready, use wide layout with columns
         if st.session_state.presentation_ready:
@@ -161,7 +206,7 @@ class PresentationApp:
                             st.error("⚠️ Please enter a topic")
                             return
                         
-                        result = self.generate_presentation(topic, description)
+                        self.generate_presentation(topic, description)
             
             # Show current presentation in right column
             with col2:

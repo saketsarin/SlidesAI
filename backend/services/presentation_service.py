@@ -3,6 +3,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 import os
+from config import Config
 from services.diagram_service import DiagramService
 from utils.content_validator import ContentValidator
 from utils.text_processor import TextProcessor
@@ -15,6 +16,86 @@ class PresentationService:
         self.service = build('slides', 'v1', credentials=credentials)
         self.drive_service = build('drive', 'v3', credentials=credentials)
         self.images_folder_id = self._get_or_create_images_folder()
+
+    def _rgb_to_text_color_dict(self, rgb_dict):
+        """Convert RGB dictionary to proper Google Slides text color format"""
+        return {
+            'opaqueColor': {
+                'rgbColor': rgb_dict
+            }
+        }
+
+    def _rgb_to_fill_color_dict(self, rgb_dict):
+        """Convert RGB dictionary to proper Google Slides fill color format"""
+        return {
+            'rgbColor': rgb_dict
+        }
+
+    def _apply_theme(self, presentation_id, theme_name='modern'):
+        """Apply theme to the presentation with proper color formatting"""
+        try:
+            theme = Config.PRESENTATION_THEMES.get(theme_name, Config.PRESENTATION_THEMES['modern'])
+            
+            presentation = self.service.presentations().get(
+                presentationId=presentation_id
+            ).execute()
+            
+            slide_ids = [slide.get('objectId') for slide in presentation.get('slides', [])]
+            requests = []
+            
+            for slide_id in slide_ids:
+                if 'gradient_color' in theme:
+                    requests.append({
+                        'updatePageProperties': {
+                            'objectId': slide_id,
+                            'pageProperties': {
+                                'pageBackgroundFill': {
+                                    'gradientFill': {
+                                        'gradient': {
+                                            'type': 'LINEAR',
+                                            'stops': [
+                                                {
+                                                    'position': 0,
+                                                    'color': self._rgb_to_fill_color_dict(theme['background_color'])
+                                                },
+                                                {
+                                                    'position': 1,
+                                                    'color': self._rgb_to_fill_color_dict(theme['gradient_color'])
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            },
+                            'fields': 'pageBackgroundFill.gradientFill'
+                        }
+                    })
+                else:
+                    requests.append({
+                        'updatePageProperties': {
+                            'objectId': slide_id,
+                            'pageProperties': {
+                                'pageBackgroundFill': {
+                                    'solidFill': {
+                                        'color': self._rgb_to_fill_color_dict(theme['background_color'])
+                                    }
+                                }
+                            },
+                            'fields': 'pageBackgroundFill.solidFill'
+                        }
+                    })
+            
+            if requests:
+                self.service.presentations().batchUpdate(
+                    presentationId=presentation_id,
+                    body={'requests': requests}
+                ).execute()
+            
+            logger.info(f"Applied theme {theme_name} to presentation {presentation_id}")
+            
+        except Exception as e:
+            logger.error(f"Error applying theme: {str(e)}")
+            raise
     
     def _get_or_create_images_folder(self):
         """Get or create a folder for presentation images"""
@@ -168,10 +249,11 @@ class PresentationService:
         
         return base_request
     
-    def _create_slide(self, presentation_id, index, slide_content):
-        """Create a slide with rich text formatting"""
+    def _create_slide(self, presentation_id, index, slide_content, theme_name='modern'):
+        """Create a slide with themed formatting"""
         try:
-            # Determine if slide should have an image
+            theme = Config.PRESENTATION_THEMES.get(theme_name, Config.PRESENTATION_THEMES['modern'])
+            
             has_image = 'diagram_prompt' in slide_content and slide_content['diagram_prompt']
             layout = 'TITLE_AND_TWO_COLUMNS' if has_image else 'TITLE_AND_BODY'
             
@@ -193,81 +275,12 @@ class PresentationService:
             slide_details = self._get_slide_details(presentation_id, slide_id)
             title_id, body_id = slide_details['title_id'], slide_details['body_id']
             
-            # Format the content with proper styling
-            formatted_text = ""
-            style_ranges = []
-            current_index = 0
-
-            # Process content blocks and track text ranges
-            for block in slide_content['content']:
-                block_type = block.get('type', '')
-                
-                if block_type == 'paragraph':
-                    text = f"{block['text']}\n\n"
-                    formatted_text += text
-                    style_ranges.append({
-                        'start': current_index,
-                        'end': current_index + len(text),
-                        'style': 'paragraph'
-                    })
-                    current_index += len(text)
-                
-                elif block_type == 'bullets':
-                    for item in block['items']:
-                        if isinstance(item, dict):
-                            bullet_text = f"• {item['text']}\n"
-                            formatted_text += bullet_text
-                            style_ranges.append({
-                                'start': current_index,
-                                'end': current_index + len(bullet_text),
-                                'style': 'bullet'
-                            })
-                            current_index += len(bullet_text)
-                            
-                            for subitem in item.get('subitems', []):
-                                sub_text = f"    ◦ {subitem}\n"
-                                formatted_text += sub_text
-                                style_ranges.append({
-                                    'start': current_index,
-                                    'end': current_index + len(sub_text),
-                                    'style': 'subbullet'
-                                })
-                                current_index += len(sub_text)
-                        else:
-                            bullet_text = f"• {item}\n"
-                            formatted_text += bullet_text
-                            style_ranges.append({
-                                'start': current_index,
-                                'end': current_index + len(bullet_text),
-                                'style': 'bullet'
-                            })
-                            current_index += len(bullet_text)
-                    formatted_text += "\n"
-                    current_index += 1
-                
-                elif block_type == 'stats':
-                    header_text = "Key Statistics:\n"
-                    formatted_text += header_text
-                    style_ranges.append({
-                        'start': current_index,
-                        'end': current_index + len(header_text),
-                        'style': 'heading'
-                    })
-                    current_index += len(header_text)
-                    
-                    for stat in block['items']:
-                        stat_text = f"📊 {stat}\n"
-                        formatted_text += stat_text
-                        style_ranges.append({
-                            'start': current_index,
-                            'end': current_index + len(stat_text),
-                            'style': 'stats'
-                        })
-                        current_index += len(stat_text)
-                    formatted_text += "\n"
-                    current_index += 1
+            formatted_text = self._format_content(slide_content['content'])
             
-            # Create base requests
+            # Convert colors to proper format for text
+            primary_color = self._rgb_to_text_color_dict(theme['primary_color'])
+            secondary_color = self._rgb_to_text_color_dict(theme.get('secondary_color', theme['primary_color']))
+            
             text_requests = [
                 {
                     'insertText': {
@@ -286,9 +299,20 @@ class PresentationService:
                         'objectId': title_id,
                         'style': {
                             'fontSize': {'magnitude': 24, 'unit': 'PT'},
-                            'bold': True
+                            'bold': True,
+                            'foregroundColor': primary_color
                         },
-                        'fields': 'fontSize,bold'
+                        'fields': 'fontSize,bold,foregroundColor'
+                    }
+                },
+                {
+                    'updateTextStyle': {
+                        'objectId': body_id,
+                        'style': {
+                            'fontSize': {'magnitude': 14, 'unit': 'PT'},
+                            'foregroundColor': secondary_color
+                        },
+                        'fields': 'fontSize,foregroundColor'
                     }
                 },
                 {
@@ -305,16 +329,6 @@ class PresentationService:
                 }
             ]
             
-            # Add style range requests
-            for range_info in style_ranges:
-                style_request = self._create_text_style_request(
-                    body_id,
-                    range_info,
-                    range_info['style']
-                )
-                text_requests.append(style_request)
-            
-            # Add positioning if slide has image
             if has_image:
                 text_requests.append({
                     'updatePageElementTransform': {
@@ -342,46 +356,33 @@ class PresentationService:
             logger.error(f"Error creating slide {index + 1}: {str(e)}")
             raise
     
-    def create_presentation(self, content):
-        """Create a new presentation with adaptive layouts"""
+    def create_presentation(self, content, theme_name='modern'):
+        """Create a new presentation with theme"""
         try:
-            # Create new presentation
+            # Create presentation
             presentation = self.service.presentations().create(
                 body={'title': content['title']}
             ).execute()
+            
             presentation_id = presentation.get('presentationId')
             
+            # Apply theme first
+            self._apply_theme(presentation_id, theme_name)
+
             # Initialize diagram service if needed
             diagram_service = DiagramService()
             
             # Create slides
-            for index, slide in enumerate(content['slides']):
-                try:
-                    # Create the slide first
-                    slide_id = self._create_slide(presentation_id, index, slide)
-                    
-                    # Generate and insert diagram only if slide has diagram_prompt
-                    if 'diagram_prompt' in slide and slide['diagram_prompt']:
-                        try:
-                            # Generate the diagram
-                            image_path = diagram_service.generate_diagram(
-                                prompt=slide['diagram_prompt']
-                            )
-                            
-                            # Insert the diagram into the slide
-                            self.insert_diagram(
-                                presentation_id=presentation_id,
-                                slide_id=slide_id,
-                                image_path=image_path
-                            )
-                            
-                        except Exception as e:
-                            logger.error(f"Error generating/inserting diagram for slide {index + 1}: {str(e)}")
-                            continue
-                    
-                except Exception as e:
-                    logger.error(f"Error processing slide {index + 1}: {str(e)}")
-                    continue
+            for index, slide_content in enumerate(content['slides']):
+                slide_id = self._create_slide(presentation_id, index, slide_content, theme_name)
+                
+                # Generate and insert diagram if needed
+                if 'diagram_prompt' in slide_content and slide_content['diagram_prompt']:
+                    try:
+                        image_path = diagram_service.generate_diagram(slide_content['diagram_prompt'])
+                        self.insert_diagram(presentation_id, slide_id, image_path)
+                    except Exception as e:
+                        logger.error(f"Error generating/inserting diagram for slide {index + 1}: {str(e)}")
             
             return presentation_id
             
