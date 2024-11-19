@@ -51,17 +51,130 @@ class PresentationService:
         except Exception as e:
             logger.error(f"Error creating images folder: {str(e)}")
             raise
+
+    def _get_text_ranges(self, content):
+        """Find ranges of different text styles in the content"""
+        ranges = []
+        lines = content.split('\n')
+        current_index = 0
+        
+        for line in lines:
+            line_length = len(line) + 1  # +1 for newline
+            
+            if line.startswith('📊'):
+                ranges.append({
+                    'start': current_index,
+                    'end': current_index + line_length,
+                    'style': 'stats'
+                })
+            elif line.startswith('Key Statistics:'):
+                ranges.append({
+                    'start': current_index,
+                    'end': current_index + line_length,
+                    'style': 'heading'
+                })
+            
+            current_index += line_length
+        
+        return ranges
+
+    def _format_content(self, content_blocks):
+        """Format varied content types into slide text"""
+        formatted_text = ""
+        
+        for block in content_blocks:
+            block_type = block.get('type', '')
+            
+            if block_type == 'paragraph':
+                formatted_text += f"{block['text']}\n\n"
+            
+            elif block_type == 'bullets':
+                for item in block['items']:
+                    if isinstance(item, dict):
+                        # Main bullet with sub-bullets
+                        formatted_text += f"• {item['text']}\n"
+                        for subitem in item.get('subitems', []):
+                            formatted_text += f"    ◦ {subitem}\n"
+                    else:
+                        # Simple bullet point
+                        formatted_text += f"• {item}\n"
+                formatted_text += "\n"
+            
+            elif block_type == 'stats':
+                formatted_text += "Key Statistics:\n"
+                for stat in block['items']:
+                    formatted_text += f"📊 {stat}\n"
+                formatted_text += "\n"
+            
+            elif block_type == 'conclusion':
+                formatted_text += f"\n{block['text']}\n"
+        
+        return formatted_text.strip()
+    
+    def _create_text_style_request(self, object_id, range_info, style_type):
+        """Create a properly formatted text style request"""
+        base_request = {
+            'updateTextStyle': {
+                'objectId': object_id,
+                'textRange': {
+                    'type': 'FIXED_RANGE',
+                    'startIndex': range_info['start'],
+                    'endIndex': range_info['end']
+                },
+                'style': {},
+                'fields': ''
+            }
+        }
+        
+        if style_type == 'heading':
+            base_request['updateTextStyle'].update({
+                'style': {
+                    'bold': True,
+                    'fontSize': {'magnitude': 16, 'unit': 'PT'}
+                },
+                'fields': 'bold,fontSize'
+            })
+        elif style_type == 'stats':
+            base_request['updateTextStyle'].update({
+                'style': {
+                    'foregroundColor': {
+                        'opaqueColor': {'rgbColor': {'red': 0.2, 'green': 0.4, 'blue': 0.7}}
+                    },
+                    'bold': True
+                },
+                'fields': 'foregroundColor,bold'
+            })
+        elif style_type == 'bullet':
+            base_request['updateTextStyle'].update({
+                'style': {
+                    'fontSize': {'magnitude': 14, 'unit': 'PT'}
+                },
+                'fields': 'fontSize'
+            })
+        elif style_type == 'subbullet':
+            base_request['updateTextStyle'].update({
+                'style': {
+                    'fontSize': {'magnitude': 12, 'unit': 'PT'}
+                },
+                'fields': 'fontSize'
+            })
+        elif style_type == 'paragraph':
+            base_request['updateTextStyle'].update({
+                'style': {
+                    'fontSize': {'magnitude': 14, 'unit': 'PT'}
+                },
+                'fields': 'fontSize'
+            })
+        
+        return base_request
     
     def _create_slide(self, presentation_id, index, slide_content):
-        """Create a slide with adaptive layout based on content"""
+        """Create a slide with rich text formatting"""
         try:
             # Determine if slide should have an image
             has_image = 'diagram_prompt' in slide_content and slide_content['diagram_prompt']
-            
-            # Choose layout based on content
             layout = 'TITLE_AND_TWO_COLUMNS' if has_image else 'TITLE_AND_BODY'
             
-            # Create slide
             requests = [{
                 'createSlide': {
                     'insertionIndex': index,
@@ -77,28 +190,97 @@ class PresentationService:
             ).execute()
             
             slide_id = response.get('replies')[0]['createSlide']['objectId']
-            
-            # Get slide details
             slide_details = self._get_slide_details(presentation_id, slide_id)
             title_id, body_id = slide_details['title_id'], slide_details['body_id']
             
-            # Create text content updates
+            # Format the content with proper styling
+            formatted_text = ""
+            style_ranges = []
+            current_index = 0
+
+            # Process content blocks and track text ranges
+            for block in slide_content['content']:
+                block_type = block.get('type', '')
+                
+                if block_type == 'paragraph':
+                    text = f"{block['text']}\n\n"
+                    formatted_text += text
+                    style_ranges.append({
+                        'start': current_index,
+                        'end': current_index + len(text),
+                        'style': 'paragraph'
+                    })
+                    current_index += len(text)
+                
+                elif block_type == 'bullets':
+                    for item in block['items']:
+                        if isinstance(item, dict):
+                            bullet_text = f"• {item['text']}\n"
+                            formatted_text += bullet_text
+                            style_ranges.append({
+                                'start': current_index,
+                                'end': current_index + len(bullet_text),
+                                'style': 'bullet'
+                            })
+                            current_index += len(bullet_text)
+                            
+                            for subitem in item.get('subitems', []):
+                                sub_text = f"    ◦ {subitem}\n"
+                                formatted_text += sub_text
+                                style_ranges.append({
+                                    'start': current_index,
+                                    'end': current_index + len(sub_text),
+                                    'style': 'subbullet'
+                                })
+                                current_index += len(sub_text)
+                        else:
+                            bullet_text = f"• {item}\n"
+                            formatted_text += bullet_text
+                            style_ranges.append({
+                                'start': current_index,
+                                'end': current_index + len(bullet_text),
+                                'style': 'bullet'
+                            })
+                            current_index += len(bullet_text)
+                    formatted_text += "\n"
+                    current_index += 1
+                
+                elif block_type == 'stats':
+                    header_text = "Key Statistics:\n"
+                    formatted_text += header_text
+                    style_ranges.append({
+                        'start': current_index,
+                        'end': current_index + len(header_text),
+                        'style': 'heading'
+                    })
+                    current_index += len(header_text)
+                    
+                    for stat in block['items']:
+                        stat_text = f"📊 {stat}\n"
+                        formatted_text += stat_text
+                        style_ranges.append({
+                            'start': current_index,
+                            'end': current_index + len(stat_text),
+                            'style': 'stats'
+                        })
+                        current_index += len(stat_text)
+                    formatted_text += "\n"
+                    current_index += 1
+            
+            # Create base requests
             text_requests = [
-                # Insert title
                 {
                     'insertText': {
                         'objectId': title_id,
                         'text': slide_content['title']
                     }
                 },
-                # Insert body text
                 {
                     'insertText': {
                         'objectId': body_id,
-                        'text': '\n• ' + '\n• '.join(slide_content['content'])
+                        'text': formatted_text
                     }
                 },
-                # Format title
                 {
                     'updateTextStyle': {
                         'objectId': title_id,
@@ -109,19 +291,30 @@ class PresentationService:
                         'fields': 'fontSize,bold'
                     }
                 },
-                # Format body text
                 {
-                    'updateTextStyle': {
+                    'updateParagraphStyle': {
                         'objectId': body_id,
                         'style': {
-                            'fontSize': {'magnitude': 18, 'unit': 'PT'}
+                            'lineSpacing': 150,
+                            'spaceAbove': {'magnitude': 10, 'unit': 'PT'},
+                            'spaceBelow': {'magnitude': 10, 'unit': 'PT'},
+                            'indentStart': {'magnitude': 20, 'unit': 'PT'}
                         },
-                        'fields': 'fontSize'
+                        'fields': 'lineSpacing,spaceAbove,spaceBelow,indentStart'
                     }
                 }
             ]
             
-            # Add positioning only if slide has image
+            # Add style range requests
+            for range_info in style_ranges:
+                style_request = self._create_text_style_request(
+                    body_id,
+                    range_info,
+                    range_info['style']
+                )
+                text_requests.append(style_request)
+            
+            # Add positioning if slide has image
             if has_image:
                 text_requests.append({
                     'updatePageElementTransform': {

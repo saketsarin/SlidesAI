@@ -10,40 +10,66 @@ class OpenAIService:
         self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
     
     def create_presentation_content(self, topic, description=""):
-        """Generate presentation content with diagram suggestions"""
+        """Generate detailed presentation content with varied text formatting"""
         try:
             logger.info(f"Generating content for topic: {topic}")
             
             prompt = f"""Create a detailed presentation outline for the topic: {topic}
             Additional context: {description}
             
-            For each section, also suggest if it would benefit from a diagram and what type of diagram.
-            
-            Please provide:
-            1. A compelling title
-            2. 3 main sections
-            3. 3-4 key points for each section
-            4. For sections that need visualization, include a "diagram_prompt" with specific instructions
-            5. Out of all the sections, maximum half of them should have diagrams
+            Please provide rich, detailed content for each slide with varied text formatting.
+            Each slide should include a combination of these elements as appropriate:
+            1. A clear, concise title
+            2. An opening paragraph introducing the slide's topic
+            3. Detailed bullet points (4-6 points) with sub-bullets where relevant
+            4. Key statistics or data points
+            5. Specific examples or case studies
+            6. Concluding remarks or transition text
+            7. For visual slides, include a detailed diagram_prompt
             
             Format as JSON with the following structure:
             {{
-                "title": "Main title",
+                "title": "Main presentation title",
                 "slides": [
                     {{
                         "title": "Slide title",
-                        "content": ["point 1", "point 2", "point 3"],
+                        "content": [
+                            {{
+                                "type": "paragraph",
+                                "text": "Opening paragraph text..."
+                            }},
+                            {{
+                                "type": "bullets",
+                                "items": [
+                                    {{
+                                        "text": "Main bullet point",
+                                        "subitems": ["Sub-bullet 1", "Sub-bullet 2"]
+                                    }},
+                                    // More bullet points...
+                                ]
+                            }},
+                            {{
+                                "type": "stats",
+                                "items": ["Statistic 1: Value", "Statistic 2: Value"]
+                            }},
+                            {{
+                                "type": "conclusion",
+                                "text": "Concluding remark or transition"
+                            }}
+                        ],
                         "diagram_prompt": "Optional. Detailed instructions for diagram generation"
                     }}
                 ]
             }}
+
+            Make the content substantial and informative, with proper flow between points.
             """
             
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
-                max_tokens=2000
+                max_tokens=3000  # Increased for more detailed content
             )
             
             content = response.choices[0].message.content
@@ -54,9 +80,6 @@ class OpenAIService:
             
             return parsed_content
             
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing error: {str(e)}")
-            raise Exception("Failed to parse presentation content")
         except Exception as e:
             logger.error(f"Error generating presentation content: {str(e)}")
             raise
